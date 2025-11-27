@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 from bs4 import BeautifulSoup
 from docx import Document
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 from pptx import Presentation
 import polib
 
