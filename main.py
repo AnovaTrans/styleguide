@@ -22,9 +22,9 @@ def choose_claude_model() -> str:
     choice = input("Enter your choice (1-4): ").strip()
 
     if choice == "2":
-        return "claude-opus-4.1-20240925"
+        return "claude-opus-4-1-20250805"
     elif choice == "3":
-        return "claude-haiku-4.5-20241022"
+        return "claude-haiku-4-5-20251001"
     elif choice == "4":
         return input("Enter custom Claude model ID: ").strip()
     else:
@@ -46,13 +46,60 @@ def detect_source_language(file_path: str) -> str:
     except Exception:
         return "unknown"
 
+    # Extended language detection mapping
     mapping = {
+        # EU Languages
+        "bg": "bg-BG",
+        "hr": "hr-HR",
+        "cs": "cs-CZ",
+        "da": "da-DK",
+        "nl": "nl-NL",
         "de": "de-DE",
         "en": "en-US",
+        "et": "et-EE",
+        "fi": "fi-FI",
         "fr": "fr-FR",
-        "tr": "tr-TR",
-        "es": "es-ES",
+        "el": "el-GR",
+        "hu": "hu-HU",
+        "ga": "ga-IE",
         "it": "it-IT",
+        "lv": "lv-LV",
+        "lt": "lt-LT",
+        "lb": "lb-LU",
+        "mt": "mt-MT",
+        "pl": "pl-PL",
+        "pt": "pt-PT",
+        "pt-br": "pt-BR",
+        "ro": "ro-RO",
+        "sk": "sk-SK",
+        "sl": "sl-SI",
+        "es": "es-ES",
+        "sv": "sv-SE",
+        
+        # Non-EU European Languages
+        "sq": "sq-AL",
+        "be": "be-BY",
+        "bs": "bs-BA",
+        "is": "is-IS",
+        "mk": "mk-MK",
+        "no": "no-NO",
+        "ru": "ru-RU",
+        "sr": "sr-RS",
+        "uk": "uk-UA",
+        
+        # Additional Major Languages
+        "tr": "tr-TR",
+        "ar": "ar-SA",
+        "zh-cn": "zh-CN",
+        "zh-tw": "zh-TW",
+        "ja": "ja-JP",
+        "ko": "ko-KR",
+        "th": "th-TH",
+        "vi": "vi-VN",
+        "id": "id-ID",
+        "hi": "hi-IN",
+        "he": "he-IL",
+        "af": "af-ZA",
     }
 
     return mapping.get(lang_code.lower(), lang_code)
