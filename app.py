@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from generator import StyleGuideGenerator
 from exporter import StyleGuideExporter
 from text_utils import DocumentProcessor
+from anova_brand_theme import apply_anova_theme, anova_header, anova_footer, anova_sidebar_logo
 
 # Optional: language detection
 try:
@@ -180,12 +181,11 @@ def get_anthropic_key_from_env_or_ui():
 
 # ---------- Streamlit UI ----------
 
-st.set_page_config(page_title="Style Guide Generator", layout="wide")
+st.set_page_config(page_title="Anova Style Guide Creator", page_icon="📝", layout="wide")
 
-st.title("Style Guide Generator")
-st.caption(
-    "Complete confidentiality guaranteed – files are processed locally with your API key."
-)
+apply_anova_theme()
+
+anova_header("Style Guide Creator", "AI-powered translation style guide generation")
 
 st.markdown(
     """
@@ -214,6 +214,9 @@ with col2:
         "Target Languages (optional – leave empty for generic style guide)",
         list(LANG_OPTIONS.keys()),
     )
+
+# Sidebar content
+anova_sidebar_logo()
 
 # Advanced options (model)
 st.sidebar.subheader("Model Settings")
@@ -320,3 +323,5 @@ if generate_btn:
 
             except Exception as e:
                 st.error(f"Error during generation: {e}")
+
+anova_footer()
