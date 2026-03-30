@@ -80,7 +80,7 @@ class LLMClient:
 
     # ── Single-pass generation (backward compatible) ─────────────────
 
-    def generate_style_guide_text(self, system_prompt: str, user_prompt: str) -> str:
+    def generate_style_guide_text(self, system_prompt: str, user_prompt: str, max_tokens: int = 32000) -> str:
         """
         Generate a style guide in a single pass.
         Kept for backward compatibility — multi-pass is preferred.
@@ -88,7 +88,7 @@ class LLMClient:
         return self._call_claude(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            max_tokens=32000,
+            max_tokens=max_tokens,
             temperature=0.2,
             use_cache=True,
         )

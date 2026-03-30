@@ -55,6 +55,9 @@ CRITICAL QUALITY REQUIREMENTS:
 - Cite actual terminology, measurements, dates, and numbers found in the document
 - Be specific about formatting rules based on actual document formatting patterns
 - Provide actionable guidance that a translator can immediately apply
+- RESPECT THE WORD LIMIT specified in the user prompt — be concise but comprehensive
+- Maximize information density: cover ALL topics but avoid verbose explanations
+- Use tables, compact lists, and terse phrasing to fit maximum scope into limited space
 
 REQUIRED STRUCTURE — You MUST include ALL of the following sections with substantial content:
 
@@ -197,6 +200,41 @@ This section must be detailed and actionable.""",
 }
 
 
+# ═══════════════════════════════════════════════════════════════════
+# DETAIL LEVEL CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════
+
+DETAIL_LEVELS = {
+    "comprehensive": {
+        "label": "Comprehensive",
+        "max_words": 5000,
+        "section_tokens": 4000,     # tokens per section in multi-pass
+        "single_pass_tokens": 16000,
+        "review_tokens": 4000,
+        "preprocessing_tokens": 2000,
+        "word_instruction": "TARGET LENGTH: ~5000 words total. Be thorough but concise — maximize coverage per word.",
+    },
+    "standard": {
+        "label": "Standard",
+        "max_words": 3500,
+        "section_tokens": 2800,
+        "single_pass_tokens": 12000,
+        "review_tokens": 2000,
+        "preprocessing_tokens": 2000,
+        "word_instruction": "TARGET LENGTH: ~3000-3500 words total. Be focused and concise — cover all sections but keep explanations brief. Use compact tables and short bullet points.",
+    },
+    "basic": {
+        "label": "Basic",
+        "max_words": 1500,
+        "section_tokens": 1200,
+        "single_pass_tokens": 5000,
+        "review_tokens": 0,     # skip review for basic
+        "preprocessing_tokens": 1500,
+        "word_instruction": "TARGET LENGTH: ~1000-1500 words total. Be extremely concise — one paragraph per section, compact term lists, minimal examples. Prioritize actionable rules over explanations.",
+    },
+}
+
+
 class StyleGuideGenerator:
     """
     Multi-pass style guide generator using Claude.
@@ -204,7 +242,7 @@ class StyleGuideGenerator:
     Architecture:
     1. Preprocessing: Extract metadata, entities, terminology from source
     2. Generation: Section-by-section or single-pass guide creation
-    3. Review: Self-review pass to fill gaps and improve quality
+    3. Review: Self-review pass to fill gaps and improve quality (skipped for basic tier)
     """
 
     def __init__(self, api_key: str, provider: str = "anthropic", model: Optional[str] = None):
@@ -335,6 +373,8 @@ Every section must contain substantial, specific content grounded in the source 
         pm_notes: Optional[str],
         glossary_text: Optional[str],
         metadata: Dict,
+        detail_level: str = "comprehensive",
+        progress_callback: Optional[callable] = None,
     ) -> str:
         """
         Phase 2: Generate style guide section by section.
@@ -342,6 +382,7 @@ Every section must contain substantial, specific content grounded in the source 
         """
         logger.info("Phase 2: Multi-pass section-by-section generation...")
 
+        config = DETAIL_LEVELS.get(detail_level, DETAIL_LEVELS["comprehensive"])
         target_desc = ", ".join(target_langs) if target_langs else "GENERIC"
 
         base_context = f"""PROJECT: {project_name}
@@ -360,21 +401,37 @@ SOURCE DOCUMENT:
 {combined_context}
 """
 
+        section_keys = list(SECTION_PROMPTS.items())
+        total_sections = len(section_keys)
+        # Total steps: preprocess(done) + sections + review = sections + 1 (review)
+        total_steps = total_sections + 1  # +1 for review step
         sections = []
-        for section_key, section_instruction in SECTION_PROMPTS.items():
+
+        for idx, (section_key, section_instruction) in enumerate(section_keys):
             logger.info(f"  Generating section: {section_key}")
+
+            if progress_callback:
+                step = idx + 1  # 1-based (preprocess was step 0)
+                pct = int((step / (total_steps + 1)) * 100)
+                section_label = section_key.split("_", 1)[-1].replace("_", " ").title()
+                progress_callback(pct, f"Generating section {step}/{total_sections}: {section_label}...")
+
             user_prompt = f"""{base_context}
+
+{config['word_instruction']}
+This is section {idx+1} of {total_sections}. Allocate words proportionally — approximately {config['max_words'] // total_sections} words for this section.
 
 INSTRUCTION:
 {section_instruction}
 
-Write this section now with detailed, specific content grounded in the source document.
-Use numbered headings, bullet points, and real examples from the document."""
+Write this section now with specific content grounded in the source document.
+Use numbered headings, bullet points, and real examples from the document.
+Be concise — every sentence must add value."""
 
             section_text = self.llm_client.generate_section(
                 system_prompt=SYSTEM_PROMPT_MAIN,
                 user_prompt=user_prompt,
-                max_tokens=8000,
+                max_tokens=config["section_tokens"],
             )
             sections.append(section_text)
 
@@ -390,11 +447,31 @@ Generated by: AICONTEXT Style Guide Creator | Anova Translation
         full_guide = header + "\n\n---\n\n".join(sections)
         return full_guide
 
-    def _review_and_enhance(self, guide_text: str, combined_context: str, metadata: Dict) -> str:
+    def _review_and_enhance(
+        self,
+        guide_text: str,
+        combined_context: str,
+        metadata: Dict,
+        detail_level: str = "comprehensive",
+        progress_callback: Optional[callable] = None,
+    ) -> str:
         """
         Phase 3: Self-review pass to identify and fill gaps.
+        Skipped for 'basic' detail level.
         """
+        config = DETAIL_LEVELS.get(detail_level, DETAIL_LEVELS["comprehensive"])
+
+        # Skip review for basic tier
+        if config["review_tokens"] == 0:
+            logger.info("Phase 3: Skipped (basic tier — no review pass)")
+            if progress_callback:
+                progress_callback(95, "Finalizing style guide...")
+            return guide_text
+
         logger.info("Phase 3: Self-review and gap-filling...")
+
+        if progress_callback:
+            progress_callback(85, "Reviewing and enhancing style guide...")
 
         user_prompt = f"""STYLE GUIDE TO REVIEW:
 {guide_text}
@@ -429,6 +506,8 @@ Review the style guide above and provide any missing content or improvements."""
         pm_notes: Optional[str] = None,
         glossary_path: Optional[str] = None,
         multi_pass: bool = True,
+        detail_level: str = "comprehensive",
+        progress_callback: Optional[callable] = None,
     ) -> str:
         """
         Main entry point for style guide generation.
@@ -441,10 +520,17 @@ Review the style guide above and provide any missing content or improvements."""
             pm_notes: Optional project manager notes
             glossary_path: Optional path to glossary file
             multi_pass: If True, use section-by-section generation (recommended)
+            detail_level: One of 'comprehensive', 'standard', 'basic'
+            progress_callback: Optional callable(percent: int, message: str)
         """
+        config = DETAIL_LEVELS.get(detail_level, DETAIL_LEVELS["comprehensive"])
+
         logger.info("Starting style guide generation...")
         logger.info(f"Source: {source_lang}, Targets: {target_langs or 'GENERIC'}, Project: {project_name}")
-        logger.info(f"Mode: {'multi-pass' if multi_pass else 'single-pass'}")
+        logger.info(f"Mode: {'multi-pass' if multi_pass else 'single-pass'}, Detail: {detail_level} (~{config['max_words']} words)")
+
+        if progress_callback:
+            progress_callback(2, "Reading source documents...")
 
         # Read all source documents
         texts: List[str] = []
@@ -469,23 +555,44 @@ Review the style guide above and provide any missing content or improvements."""
             glossary_text = TerminologyLoader.load_glossary(glossary_path)
 
         # Phase 1: Preprocess
+        if progress_callback:
+            progress_callback(5, "Preprocessing document (extracting metadata)...")
         metadata = self._preprocess_document(combined_context)
+
+        if progress_callback:
+            progress_callback(15, "Metadata extraction complete. Starting generation...")
 
         if multi_pass:
             # Phase 2: Multi-pass generation
             guide_text = self._generate_multi_pass(
                 combined_context, source_lang, target_langs,
                 project_name, pm_notes, glossary_text, metadata,
+                detail_level=detail_level,
+                progress_callback=progress_callback,
             )
             # Phase 3: Review
-            guide_text = self._review_and_enhance(guide_text, combined_context, metadata)
+            guide_text = self._review_and_enhance(
+                guide_text, combined_context, metadata,
+                detail_level=detail_level,
+                progress_callback=progress_callback,
+            )
         else:
             # Single-pass fallback (faster, cheaper, lower quality)
+            if progress_callback:
+                progress_callback(20, "Generating style guide (single-pass)...")
             user_prompt = self._build_enriched_prompt(
                 combined_context, source_lang, target_langs,
                 project_name, pm_notes, glossary_text, metadata,
             )
-            guide_text = self.llm_client.generate_style_guide_text(SYSTEM_PROMPT_MAIN, user_prompt)
+            # Add word limit instruction to single-pass prompt
+            user_prompt += f"\n\n{config['word_instruction']}"
+            guide_text = self.llm_client.generate_style_guide_text(
+                SYSTEM_PROMPT_MAIN, user_prompt,
+                max_tokens=config["single_pass_tokens"],
+            )
+
+        if progress_callback:
+            progress_callback(100, "Style guide generation complete!")
 
         logger.info("Style guide generation complete.")
         return guide_text

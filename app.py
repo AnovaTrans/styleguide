@@ -250,6 +250,26 @@ generation_mode = st.sidebar.selectbox(
 )
 use_multi_pass = "Multi-pass" in generation_mode
 
+# Detail level selection
+st.sidebar.subheader("Detail Level")
+detail_level_choice = st.sidebar.radio(
+    "Style guide detail level",
+    [
+        "Comprehensive (~5000 words)",
+        "Standard (~3000-3500 words)",
+        "Basic (~1000-1500 words)",
+    ],
+    index=0,
+    help="All levels cover the same 9 sections. Higher levels include more examples and deeper analysis.",
+)
+
+if "Comprehensive" in detail_level_choice:
+    selected_detail_level = "comprehensive"
+elif "Standard" in detail_level_choice:
+    selected_detail_level = "standard"
+else:
+    selected_detail_level = "basic"
+
 st.sidebar.markdown("---")
 api_key = get_anthropic_key_from_env_or_ui()
 if not api_key:
@@ -268,72 +288,95 @@ if generate_btn:
     elif not selected_model:
         st.error("Please select or enter a Claude model.")
     else:
-        with st.spinner("Processing files and generating style guide…"):
-            # Save uploaded files to temp directory
-            temp_dir = tempfile.mkdtemp(prefix="styleguide_")
-            temp_paths = []
-            for uf in uploaded_files:
-                temp_path = os.path.join(temp_dir, uf.name)
-                with open(temp_path, "wb") as f:
-                    f.write(uf.getbuffer())
-                temp_paths.append(temp_path)
+        # Progress bar UI elements
+        progress_bar = st.progress(0)
+        status_text = st.empty()
 
-            # Project name from first file
-            first_name = os.path.basename(temp_paths[0])
-            project_name = os.path.splitext(first_name)[0]
+        def update_progress(percent, message):
+            """Callback for real-time progress updates."""
+            percent = max(0, min(100, percent))
+            progress_bar.progress(percent / 100.0)
+            status_text.text(f"⏳ {message} ({percent}%)")
 
-            # Determine source language
-            if source_lang_mode == "Auto-detect":
-                detected = detect_source_language_from_files(temp_paths)
-                if detected == "unknown":
-                    source_lang = "unknown"
-                    st.warning(
-                        "Could not auto-detect source language reliably. "
-                        "The guide will be more generic."
-                    )
-                else:
-                    source_lang = detected
+        update_progress(1, "Preparing files...")
+
+        # Save uploaded files to temp directory
+        temp_dir = tempfile.mkdtemp(prefix="styleguide_")
+        temp_paths = []
+        for uf in uploaded_files:
+            temp_path = os.path.join(temp_dir, uf.name)
+            with open(temp_path, "wb") as f:
+                f.write(uf.getbuffer())
+            temp_paths.append(temp_path)
+
+        # Project name from first file
+        first_name = os.path.basename(temp_paths[0])
+        project_name = os.path.splitext(first_name)[0]
+
+        # Determine source language
+        update_progress(3, "Detecting source language...")
+        if source_lang_mode == "Auto-detect":
+            detected = detect_source_language_from_files(temp_paths)
+            if detected == "unknown":
+                source_lang = "unknown"
+                st.warning(
+                    "Could not auto-detect source language reliably. "
+                    "The guide will be more generic."
+                )
             else:
-                source_lang = LANG_OPTIONS[source_lang_mode]
+                source_lang = detected
+        else:
+            source_lang = LANG_OPTIONS[source_lang_mode]
 
-            # Target languages
-            target_langs = [LANG_OPTIONS[label] for label in target_labels]
+        # Target languages
+        target_langs = [LANG_OPTIONS[label] for label in target_labels]
 
-            try:
-                generator = StyleGuideGenerator(
-                    api_key=api_key,
-                    provider="anthropic",
-                    model=selected_model,
-                )
+        try:
+            generator = StyleGuideGenerator(
+                api_key=api_key,
+                provider="anthropic",
+                model=selected_model,
+            )
 
-                exporter = StyleGuideExporter(output_dir=temp_dir)
+            exporter = StyleGuideExporter(output_dir=temp_dir)
 
-                guide_text = generator.create_guide_text(
-                    file_paths=temp_paths,
-                    source_lang=source_lang,
-                    target_langs=target_langs,
-                    project_name=project_name,
-                    multi_pass=use_multi_pass,
-                )
+            guide_text = generator.create_guide_text(
+                file_paths=temp_paths,
+                source_lang=source_lang,
+                target_langs=target_langs,
+                project_name=project_name,
+                multi_pass=use_multi_pass,
+                detail_level=selected_detail_level,
+                progress_callback=update_progress,
+            )
 
-                output_filename = f"{project_name}_style_guide_claude.docx"
-                output_path = exporter.export_plaintext_docx(
-                    guide_text,
-                    output_filename,
-                )
+            update_progress(95, "Exporting to DOCX...")
 
-                with open(output_path, "rb") as f:
-                    data = f.read()
+            output_filename = f"{project_name}_style_guide_claude.docx"
+            output_path = exporter.export_plaintext_docx(
+                guide_text,
+                output_filename,
+            )
 
-                st.success("Style guide successfully generated.")
-                st.download_button(
-                    "⬇️ Download Style Guide",
-                    data=data,
-                    file_name=output_filename,
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                )
+            with open(output_path, "rb") as f:
+                data = f.read()
 
-            except Exception as e:
-                st.error(f"Error during generation: {e}")
+            update_progress(100, "Complete!")
+            progress_bar.progress(1.0)
+            status_text.empty()
+
+            word_count = len(guide_text.split())
+            st.success(f"Style guide generated successfully! ({word_count:,} words, {selected_detail_level} level)")
+            st.download_button(
+                "⬇️ Download Style Guide",
+                data=data,
+                file_name=output_filename,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+
+        except Exception as e:
+            progress_bar.empty()
+            status_text.empty()
+            st.error(f"Error during generation: {e}")
 
 anova_footer()
