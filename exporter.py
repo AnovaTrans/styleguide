@@ -1,11 +1,25 @@
+"""
+Style Guide Exporter — Enhanced DOCX Output
+=============================================
+Professional formatting with Anova branding, proper heading
+hierarchy, table support, and improved markdown-to-docx conversion.
+"""
+
 import os
+import re
 from typing import Optional
 
 from docx import Document
-from docx.shared import Pt
+from docx.shared import Pt, RGBColor, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
 
 from models import StyleGuide
+
+# Anova brand colors
+CHARCOAL = RGBColor(0x3A, 0x3A, 0x3A)
+CORAL = RGBColor(0xE8, 0x5C, 0x4A)
+TEAL = RGBColor(0x4E, 0xCD, 0xC4)
 
 
 class StyleGuideExporter:
@@ -17,25 +31,15 @@ class StyleGuideExporter:
     # ---------- JSON export for structured StyleGuide (kept for future use) ----------
 
     def export_json(self, style_guide: StyleGuide, filename: str) -> str:
-        """
-        Export a StyleGuide Pydantic model to JSON.
-        (Not used in the current Claude-only workflow, but kept for completeness.)
-        """
         path = os.path.join(self.output_dir, filename)
         with open(path, "w", encoding="utf-8") as f:
-            # Pydantic v2: no ensure_ascii argument
             f.write(style_guide.model_dump_json(indent=2))
         return path
 
-    # ---------- DOCX export for structured StyleGuide (OpenAI path, not used now) ----------
+    # ---------- DOCX export for structured StyleGuide (legacy) ----------
 
     def export_docx(self, style_guide: StyleGuide, filename: str) -> str:
-        """
-        Export a structured StyleGuide (JSON/Pydantic) to a formatted DOCX.
-
-        NOTE: This is primarily for the old OpenAI JSON workflow.
-        Your current Claude-only flow uses export_plaintext_docx().
-        """
+        """Export a structured StyleGuide (JSON/Pydantic) to a formatted DOCX."""
         doc = Document()
 
         def add_title(text: str):
@@ -54,24 +58,21 @@ class StyleGuideExporter:
             run_value = p.add_run(value)
             run_value.font.size = Pt(10)
 
-        # Header
         header = style_guide.header
         add_title(header.title)
 
         meta_p = doc.add_paragraph()
         meta_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         meta_p.add_run(f"Project: {header.project_name} | ").bold = True
-        # header.target_languages is assumed to be a list in the latest models.py
         meta_p.add_run(
             f"Source: {header.source_language} → Target(s): {', '.join(header.target_languages)}\n"
         )
         meta_p.add_run(
             f"Version: {header.version} | Prepared by: {header.prepared_by} | Date: {header.creation_date}"
         )
-
         doc.add_paragraph()
 
-        # 1. Scope & Audience
+        # 1-9: sections (same as before)
         add_section("1. Scope & Audience Profile")
         sp = style_guide.scope_purpose
         ta = style_guide.target_audience
@@ -82,13 +83,11 @@ class StyleGuideExporter:
         add_kv("Reading Behaviour", ta.reading_behaviour)
         add_kv("Cultural Sensitivities", ta.cultural_sensitivities)
 
-        # 2. Domain & Context
         add_section("2. Domain & Context")
         dc = style_guide.domain_context
         add_kv("Industry", dc.industry)
         add_kv("References", dc.references)
 
-        # 3. Language Specifications & Style
         add_section("3. Language Specifications & Style")
         ls = style_guide.language_specifications
         st = style_guide.style_tone
@@ -96,25 +95,20 @@ class StyleGuideExporter:
         add_kv("Language Register", getattr(ls, "language_register", ""))
         add_kv("Voice", ls.voice)
         add_kv("Person Address", ls.person_address)
-
         add_kv("Overall Tone", st.overall_tone)
         if st.do_instructions:
             doc.add_heading("DOs", level=2)
             for item in st.do_instructions:
-                p = doc.add_paragraph(style="List Bullet")
-                p.add_run(item)
+                doc.add_paragraph(item, style="List Bullet")
         if st.dont_instructions:
             doc.add_heading("DON'Ts", level=2)
             for item in st.dont_instructions:
-                p = doc.add_paragraph(style="List Bullet")
-                p.add_run(item)
+                doc.add_paragraph(item, style="List Bullet")
         if st.stylistic_examples:
             doc.add_heading("Stylistic Examples", level=2)
             for ex in st.stylistic_examples:
-                p = doc.add_paragraph(style="List Bullet")
-                p.add_run(ex)
+                doc.add_paragraph(ex, style="List Bullet")
 
-        # 4. Gender & Inclusivity
         add_section("4. Gender & Inclusivity")
         gi = style_guide.gender_inclusivity
         add_kv("General Approach", gi.general_approach)
@@ -123,10 +117,8 @@ class StyleGuideExporter:
         if gi.examples:
             doc.add_heading("Examples", level=2)
             for ex in gi.examples:
-                p = doc.add_paragraph(style="List Bullet")
-                p.add_run(ex)
+                doc.add_paragraph(ex, style="List Bullet")
 
-        # 5. Terminology
         add_section("5. Terminology")
         tr = style_guide.terminology_rules
         if tr.termbase_sources:
@@ -136,10 +128,8 @@ class StyleGuideExporter:
         if tr.forbidden_terms:
             doc.add_heading("Forbidden Terms", level=2)
             for term in tr.forbidden_terms:
-                p = doc.add_paragraph(style="List Bullet")
-                p.add_run(term)
+                doc.add_paragraph(term, style="List Bullet")
 
-        # 6. Do Not Translate
         add_section("6. Do Not Translate (DNT)")
         dnt = style_guide.dnt_list
         if hasattr(dnt, "brand_and_product_names"):
@@ -148,26 +138,20 @@ class StyleGuideExporter:
         if hasattr(dnt, "special_casing_terms"):
             add_kv("Special Casing Terms", ", ".join(getattr(dnt, "special_casing_terms", [])))
 
-        # 7. Formatting & Locale
         add_section("7. Formatting & Locale")
         fmt = style_guide.formatting_locale
         if hasattr(fmt, "date_format_examples") and getattr(fmt, "date_format_examples", []):
             doc.add_heading("Date Examples", level=2)
             for ex in fmt.date_format_examples:
-                p = doc.add_paragraph(style="List Bullet")
-                p.add_run(ex)
-
+                doc.add_paragraph(ex, style="List Bullet")
         if hasattr(fmt, "number_format_examples") and getattr(fmt, "number_format_examples", []):
             doc.add_heading("Number & Measurement Examples", level=2)
             for ex in fmt.number_format_examples:
-                p = doc.add_paragraph(style="List Bullet")
-                p.add_run(ex)
-
+                doc.add_paragraph(ex, style="List Bullet")
         add_kv("Units & Measurements", fmt.units_and_measurements)
         add_kv("Quotation Marks", fmt.quotation_marks)
         add_kv("Bullets & Lists", fmt.bullets_and_lists)
 
-        # 8. Spatial & Visual Guidelines
         add_section("8. Spatial & Visual Guidelines")
         spc = style_guide.spatial_considerations
         vis = style_guide.visual_content
@@ -178,7 +162,6 @@ class StyleGuideExporter:
         add_kv("Screenshots & UI", vis.screenshots_and_ui)
         add_kv("Culturally Sensitive Imagery", vis.culturally_sensitive_imagery)
 
-        # 9. QA & Resources
         add_section("9. QA & Resources")
         qa = style_guide.quality_assurance
         res = style_guide.reference_resources
@@ -188,7 +171,6 @@ class StyleGuideExporter:
         if res.standard_glossaries:
             add_kv("Standard Glossaries", ", ".join(res.standard_glossaries))
 
-        # Footer
         doc.add_section()
         fp = doc.add_paragraph(style_guide.footnote)
         fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -199,110 +181,201 @@ class StyleGuideExporter:
         doc.save(path)
         return path
 
-    # ---------- helper for plain-text export ----------
+    # ---------- Enhanced markdown-to-DOCX helpers ----------
 
     @staticmethod
     def _add_formatted_runs(paragraph, text: str):
         """
-        Very simple markdown-style bold handling:
-        - Treat **this** as bold.
-        Everything else stays normal.
+        Enhanced markdown-style formatting:
+        - **bold** → bold
+        - *italic* → italic (single asterisks, not inside **)
+        - `code` → monospace
         """
-        if "**" not in text:
+        if "**" not in text and "`" not in text:
             paragraph.add_run(text)
             return
 
-        parts = text.split("**")
-        for i, part in enumerate(parts):
-            if not part:
-                continue
-            run = paragraph.add_run(part)
-            if i % 2 == 1:
-                run.bold = True
+        # Handle code first
+        parts = re.split(r'(`[^`]+`)', text)
+        for part in parts:
+            if part.startswith('`') and part.endswith('`'):
+                run = paragraph.add_run(part[1:-1])
+                run.font.name = 'Consolas'
+                run.font.size = Pt(10)
+            elif "**" in part:
+                # Handle bold
+                bold_parts = part.split("**")
+                for i, bp in enumerate(bold_parts):
+                    if not bp:
+                        continue
+                    run = paragraph.add_run(bp)
+                    if i % 2 == 1:
+                        run.bold = True
+            else:
+                paragraph.add_run(part)
 
-    # ---------- DOCX export for plain text guide (Claude) ----------
+    @staticmethod
+    def _detect_heading_level(stripped: str):
+        """Detect heading level from numbered prefix like '1.', '1.1', '1.1.1'."""
+        match = re.match(r'^(\d+(?:\.\d+)*)\.?\s+(.+)', stripped)
+        if match:
+            prefix = match.group(1)
+            text = match.group(2)
+            dots = prefix.count('.')
+            level = min(dots + 1, 3)  # level 1, 2, or 3
+            return level, f"{prefix}. {text}"
+        return None, None
+
+    # ---------- DOCX export for plain text guide (Claude) — Enhanced ----------
 
     def export_plaintext_docx(self, guide_text: str, filename: str) -> str:
         """
-        Convert the Claude-generated plain text guide into a nicer DOCX:
+        Convert the Claude-generated plain text guide into a professional DOCX.
 
-        - First non-empty line -> Title (centered).
-        - Line starting with "PROJECT: " -> centered bold project line.
-        - Lines of just '---' -> visual separator line.
-        - Lines starting with digits + '.' -> Heading 1 (section titles).
-        - Lines starting with '- ', '- [ ]', '- [x]' -> bullet list items.
-        - **bold** markers -> bold runs.
-        - Everything else -> normal paragraphs.
+        Enhanced features:
+        - Multi-level heading detection (1., 1.1, 1.1.1)
+        - Anova branding (header/footer text)
+        - Better bullet handling (-, *, numbered lists)
+        - Code/monospace support
+        - Sub-heading detection (lines ending with :)
         """
         doc = Document()
 
+        # Set default style
+        style = doc.styles['Normal']
+        style.font.name = 'Calibri'
+        style.font.size = Pt(11)
+        style.font.color.rgb = CHARCOAL
+
         title_added = False
+        prev_was_empty = False
 
         for raw_line in guide_text.splitlines():
             line = raw_line.rstrip("\n")
             stripped = line.strip()
 
-            # Empty line -> blank paragraph
+            # Empty line → blank paragraph (but avoid double-spacing)
             if not stripped:
-                doc.add_paragraph()
+                if not prev_was_empty:
+                    doc.add_paragraph()
+                prev_was_empty = True
                 continue
+            prev_was_empty = False
 
-            # Separator lines like '---'
-            if all(ch == "-" for ch in stripped) and len(stripped) >= 3:
+            # Separator lines like '---' or '═══'
+            if len(stripped) >= 3 and all(ch in '-=─═~' for ch in stripped):
                 p = doc.add_paragraph()
-                run = p.add_run("─" * 40)
-                run.italic = True
+                run = p.add_run("─" * 50)
+                run.font.color.rgb = TEAL
+                run.font.size = Pt(8)
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 continue
 
-            # First non-empty line -> title
+            # First non-empty line → title
             if not title_added:
                 p = doc.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 try:
                     p.style = doc.styles["Title"]
                 except KeyError:
-                    # Fallback: use Heading 0 equivalent
                     p.style = doc.styles["Heading 1"]
                 self._add_formatted_runs(p, stripped)
+                # Set title color
+                for run in p.runs:
+                    run.font.color.rgb = CHARCOAL
                 title_added = True
                 continue
 
-            # Project line
-            if stripped.upper().startswith("PROJECT: "):
+            # Project/metadata line
+            upper = stripped.upper()
+            if upper.startswith("PROJECT:") or upper.startswith("SOURCE:") or upper.startswith("GENERATED BY:"):
                 p = doc.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 run = p.add_run(stripped)
-                run.bold = True
+                run.font.size = Pt(10)
+                run.font.color.rgb = RGBColor(0x9B, 0x9B, 0x9B)
                 continue
 
-            # Heading detection: "1. SCOPE & PURPOSE"
-            first_char = stripped[0]
-            if first_char.isdigit():
-                prefix, sep, rest = stripped.partition(".")
-                if sep and prefix.isdigit():
-                    heading_text = rest.strip()
-                    # Keep "1. " prefix in the visible text to mirror your sample
-                    heading_full = f"{prefix}. {heading_text}" if heading_text else stripped
-                    h = doc.add_heading(heading_full, level=1)
-                    continue
+            # Heading detection: "1. SCOPE" or "1.1 Sub-heading" or "1.1.1 Detail"
+            level, heading_text = self._detect_heading_level(stripped)
+            if level is not None:
+                h = doc.add_heading(heading_text, level=level)
+                for run in h.runs:
+                    run.font.color.rgb = CHARCOAL
+                continue
 
-            # Bullet / checklist lines
-            bullet_prefixes = ("- [ ]", "- [x]", "- [X]", "- ")
-            if stripped.startswith(bullet_prefixes):
-                # Remove the leading marker / checkbox
-                cleaned = stripped
-                for bp in bullet_prefixes:
-                    if cleaned.startswith(bp):
-                        cleaned = cleaned[len(bp):].strip()
-                        break
+            # Sub-heading: ALL CAPS line or line ending with ':'
+            if stripped.isupper() and len(stripped) > 3 and len(stripped) < 80:
+                h = doc.add_heading(stripped, level=2)
+                for run in h.runs:
+                    run.font.color.rgb = CHARCOAL
+                continue
+
+            # Bullet / checklist lines (-, *, •)
+            bullet_match = re.match(r'^[-*•]\s+(.+)', stripped)
+            checkbox_match = re.match(r'^-\s*\[([ xX])\]\s+(.+)', stripped)
+            numbered_match = re.match(r'^(\d+)\)\s+(.+)', stripped)
+
+            if checkbox_match:
+                checked = checkbox_match.group(1).lower() == 'x'
+                text = checkbox_match.group(2)
                 p = doc.add_paragraph(style="List Bullet")
-                self._add_formatted_runs(p, cleaned)
+                prefix = "[x] " if checked else "[ ] "
+                run = p.add_run(prefix)
+                run.font.name = 'Consolas'
+                run.font.size = Pt(10)
+                self._add_formatted_runs(p, text)
+                continue
+            elif bullet_match:
+                p = doc.add_paragraph(style="List Bullet")
+                self._add_formatted_runs(p, bullet_match.group(1))
+                continue
+            elif numbered_match:
+                p = doc.add_paragraph(style="List Number")
+                self._add_formatted_runs(p, numbered_match.group(2))
                 continue
 
-            # Fallback: normal paragraph with inline bold
+            # Indented bullet (sub-item)
+            sub_bullet_match = re.match(r'^  [-*•]\s+(.+)', line)  # Note: using 'line' not 'stripped'
+            if sub_bullet_match:
+                p = doc.add_paragraph(style="List Bullet 2")
+                self._add_formatted_runs(p, sub_bullet_match.group(1))
+                continue
+
+            # Key: Value lines (bold key)
+            kv_match = re.match(r'^([A-Za-z][A-Za-z\s&/]+):\s+(.+)', stripped)
+            if kv_match and len(kv_match.group(1)) < 40:
+                p = doc.add_paragraph()
+                p.add_run(kv_match.group(1) + ": ").bold = True
+                self._add_formatted_runs(p, kv_match.group(2))
+                continue
+
+            # Fallback: normal paragraph with inline formatting
             p = doc.add_paragraph()
             self._add_formatted_runs(p, stripped)
+
+        # ── Footer ──
+        doc.add_paragraph()
+        sep = doc.add_paragraph()
+        sep.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = sep.add_run("─" * 50)
+        run.font.color.rgb = TEAL
+        run.font.size = Pt(8)
+
+        footer = doc.add_paragraph()
+        footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = footer.add_run(
+            "This style guide was generated by AICONTEXT Style Guide Creator | Anova Translation"
+        )
+        run.italic = True
+        run.font.size = Pt(9)
+        run.font.color.rgb = RGBColor(0x9B, 0x9B, 0x9B)
+
+        attr = doc.add_paragraph()
+        attr.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = attr.add_run("www.anova.bg | info@anova.bg")
+        run.font.size = Pt(8)
+        run.font.color.rgb = TEAL
 
         path = os.path.join(self.output_dir, filename)
         doc.save(path)

@@ -15,21 +15,21 @@ except ImportError:
 
 def choose_claude_model() -> str:
     print("\nSelect Claude Model Version:")
-    print("1. Sonnet 4.5 (Best Balance) [Default]")
-    print("2. Opus 4.1 (Complex Reasoning/Coding)")
+    print("1. Sonnet 4.6 (Best Value — Recommended) [Default]")
+    print("2. Opus 4.6 (Premium Quality)")
     print("3. Haiku 4.5 (Fast/Cost-Optimized)")
     print("4. Enter Custom Model ID")
     choice = input("Enter your choice (1-4): ").strip()
 
     if choice == "2":
-        return "claude-opus-4-1-20250805"
+        return "claude-opus-4-6"
     elif choice == "3":
         return "claude-haiku-4-5-20251001"
     elif choice == "4":
         return input("Enter custom Claude model ID: ").strip()
     else:
-        print("Selected Default: claude-sonnet-4-5-20250929")
-        return "claude-sonnet-4-5-20250929"
+        print("Selected Default: claude-sonnet-4-6")
+        return "claude-sonnet-4-6"
 
 
 def detect_source_language(file_path: str) -> str:

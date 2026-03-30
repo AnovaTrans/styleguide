@@ -223,21 +223,32 @@ st.sidebar.subheader("Model Settings")
 model_choice = st.sidebar.selectbox(
     "Claude Model",
     [
-        "claude-sonnet-4-5-20250929  (Sonnet 4.5 – default)",
-        "claude-opus-4-1-20250805    (Opus 4.1)",
-        "claude-haiku-4-5-20251001   (Haiku 4.5)",
+        "claude-sonnet-4-6          (Sonnet 4.6 – default, best value)",
+        "claude-opus-4-6            (Opus 4.6 – premium quality)",
+        "claude-haiku-4-5-20251001  (Haiku 4.5 – budget)",
         "Custom model ID",
     ],
 )
 
-if "Sonnet 4.5" in model_choice:
-    selected_model = "claude-sonnet-4-5-20250929"
-elif "Opus 4.1" in model_choice:
-    selected_model = "claude-opus-4-1-20250805"
+if "Sonnet 4.6" in model_choice:
+    selected_model = "claude-sonnet-4-6"
+elif "Opus 4.6" in model_choice:
+    selected_model = "claude-opus-4-6"
 elif "Haiku 4.5" in model_choice:
     selected_model = "claude-haiku-4-5-20251001"
 else:
     selected_model = st.sidebar.text_input("Custom Claude model ID", "").strip()
+
+# Generation mode
+st.sidebar.subheader("Generation Mode")
+generation_mode = st.sidebar.selectbox(
+    "Quality vs Speed",
+    [
+        "Multi-pass (Recommended – highest quality)",
+        "Single-pass (Faster, lower cost)",
+    ],
+)
+use_multi_pass = "Multi-pass" in generation_mode
 
 st.sidebar.markdown("---")
 api_key = get_anthropic_key_from_env_or_ui()
@@ -302,6 +313,7 @@ if generate_btn:
                     source_lang=source_lang,
                     target_langs=target_langs,
                     project_name=project_name,
+                    multi_pass=use_multi_pass,
                 )
 
                 output_filename = f"{project_name}_style_guide_claude.docx"

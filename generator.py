@@ -1,5 +1,14 @@
+"""
+Style Guide Generator — Multi-Pass Architecture
+=================================================
+Phase 1: Document preprocessing (metadata extraction)
+Phase 2: Section-by-section generation with full document context
+Phase 3: Self-review and gap-filling pass
+"""
+
+import json
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from text_utils import DocumentProcessor, TerminologyLoader
 from llm_client import LLMClient
@@ -8,87 +17,408 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT_TEXT = """
-You are an expert Localization Architect and Linguist.
-Your task is to write a clear, well-structured Translation/Localization Style Guide
-in plain text (headings and paragraphs), based on the provided source documents,
-Project Manager notes, and terminology.
+# ═══════════════════════════════════════════════════════════════════
+# SYSTEM PROMPTS
+# ═══════════════════════════════════════════════════════════════════
 
-IMPORTANT:
-- Do NOT output JSON.
-- Do NOT use markdown code fences.
-- Instead, write a human-readable guide with numbered sections and subsections.
+PREPROCESSING_PROMPT = """You are a document metadata extraction specialist.
+Analyze the provided document content and extract structured metadata.
 
-REQUIRED STRUCTURE (EXAMPLE):
-1. Scope & Purpose
-2. Target Audience
-3. Domain & Context
-4. Language Specifications & Style
-5. Gender & Inclusivity
-6. Terminology & Do Not Translate
-7. Formatting & Locale
-8. Spatial & Visual Considerations
-9. Quality Assurance & Resources
-
-GUIDANCE:
-- If specific target languages are provided, tailor your recommendations to that/those languages.
-- If no specific target languages are given (GENERIC mode), write guidance that helps
-  translators working from the source language into multiple common target languages,
-  focusing on general principles but still using concrete examples from the source text.
-
-In section 9 (Quality Assurance & Resources), you MUST include the following three lines
-in this exact structure, filled with concrete, project-relevant content:
-
-9. QA & Resources
-QA Tools: list the concrete QA tools and checks to use (e.g. CAT tool with integrated QA,
-terminology verification against approved glossary, spell-check and grammar verification,
-number/date format validation, consistency checker, technical accuracy review).
-Thresholds: define explicit thresholds for critical, major and minor errors
-(e.g. critical errors: 0 tolerance; major errors: maximum 2 per 1,000 words; minor errors:
-maximum 5 per 1,000 words; all technical specifications must achieve 100% accuracy).
-Standard Glossaries: list 3–5 concrete reference resources (e.g. Microsoft Style Guide,
-IEC Electropedia, ISO Online Browsing Platform, IATE, SAE International terminology, etc.).
-
-You can add additional explanatory text under or around these lines if helpful, but the three
-labels "QA Tools:", "Thresholds:" and "Standard Glossaries:" must be present and filled with
-meaningful content.
-
-Within all sections, you should:
-- Describe tone, voice, and register.
-- Explain how to handle terminology, acronyms, and DNT items.
-- Explain how to handle dates, times, numbers, units, and lists.
-- Provide concrete examples taken from the source text where useful.
-- Keep the guide practical, concise, and ready for translators to use.
-
-Write the full style guide as continuous text with headings and paragraphs.
+Return ONLY valid JSON with no markdown formatting:
+{
+    "detected_domain": "primary industry/domain of the document",
+    "content_type": "marketing | technical | legal | medical | financial | general",
+    "terminology_density": "low | medium | high",
+    "key_entities": {
+        "companies": ["list of company names found"],
+        "products": ["list of product/brand names found"],
+        "people": ["list of person names found"],
+        "places": ["list of geographic locations found"]
+    },
+    "measurements_found": ["list of specific numbers, dates, units found in the document"],
+    "date_formats_found": ["list of date format patterns found, e.g. DD.MM.YYYY"],
+    "number_formats_found": ["list of number format patterns, e.g. 1.234,56 (German)"],
+    "abbreviations_found": ["list of abbreviations/acronyms found"],
+    "formatting_patterns": "description of document formatting (tables, lists, headers)",
+    "register": "formal | semi-formal | informal | mixed",
+    "estimated_word_count": 0
+}
 """
+
+SYSTEM_PROMPT_MAIN = """You are an expert Localization Architect and Linguist working for a professional
+translation agency. Your task is to write a comprehensive, detailed, and production-ready
+Translation/Localization Style Guide based on the provided source documents.
+
+CRITICAL QUALITY REQUIREMENTS:
+- Every recommendation MUST be grounded in the actual source document content
+- Include REAL examples extracted from the source text, not generic placeholders
+- Cite actual terminology, measurements, dates, and numbers found in the document
+- Be specific about formatting rules based on actual document formatting patterns
+- Provide actionable guidance that a translator can immediately apply
+
+REQUIRED STRUCTURE — You MUST include ALL of the following sections with substantial content:
+
+1. SCOPE & PURPOSE
+   - Document scope and objectives
+   - Content type classification
+   - Intended use of translations
+   - Version control and update procedures
+
+2. TARGET AUDIENCE PROFILE
+   - Demographics and expertise level
+   - Reading behavior patterns
+   - Cultural sensitivities and regional considerations
+   - Accessibility requirements
+
+3. DOMAIN & CONTEXT
+   - Primary industry/domain classification
+   - Subject matter complexity assessment
+   - Relevant standards and regulatory frameworks
+   - Reference materials and authoritative sources
+
+4. LANGUAGE SPECIFICATIONS & STYLE
+   - Target language variants/dialects
+   - Language register and formality level
+   - Voice (active/passive preferences)
+   - Person and form of address
+   - Sentence length and complexity guidelines
+   - DOs and DON'Ts with real examples from the source
+   - Stylistic examples showing correct vs incorrect translations
+
+5. GENDER & INCLUSIVITY
+   - Gender-neutral language strategy per target language
+   - Pronoun usage rules
+   - Inclusive language guidelines
+   - Practical examples for each target language
+
+6. TERMINOLOGY & DO NOT TRANSLATE (DNT)
+   - Categorized terminology list (minimum 20 terms extracted from the document)
+   - Term preferences and forbidden alternatives
+   - Acronym handling rules (expand on first use, etc.)
+   - Complete DNT list: brand names, product names, variables, placeholders, tags
+   - Named entities with translation/non-translation decisions
+   - Termbase sources and management procedures
+
+7. FORMATTING & LOCALE
+   - Date format rules with actual conversion examples from the document
+   - Number format rules with actual conversion examples
+   - Unit and measurement conversion rules
+   - Currency handling
+   - Quotation mark styles per target language
+   - Bullet and list formatting
+   - Capitalization rules
+   - Punctuation differences
+
+8. SPATIAL & VISUAL CONSIDERATIONS
+   - Text expansion/contraction expectations per language pair
+   - UI and layout constraints
+   - Truncation rules and character limits
+   - Embedded text in images
+   - Screenshot and UI element localization
+   - Culturally sensitive imagery notes
+
+9. QUALITY ASSURANCE & RESOURCES
+   QA Tools: List specific QA tools and checks (CAT tool QA, terminology verification,
+   spell-check, number/date validation, consistency checker, technical accuracy review)
+   Thresholds: Define explicit pass/fail thresholds:
+   - Critical errors: 0 tolerance
+   - Major errors: maximum 2 per 1,000 words
+   - Minor errors: maximum 5 per 1,000 words
+   - Technical specifications: 100% accuracy required
+   Standard Glossaries: List 3-5 concrete reference resources relevant to the domain
+   Risk Assessment: Key translation challenges and mitigation strategies
+   Resource Qualifications: Required translator expertise, tools, and experience level
+
+OUTPUT FORMAT:
+- Write as continuous text with numbered headings and sub-headings
+- Do NOT output JSON or use markdown code fences
+- Use **bold** for emphasis where needed
+- Use bullet points (- ) for lists
+- Include real examples from the source text wherever possible
+
+LANGUAGE: Write the style guide in English.
+"""
+
+REVIEW_PROMPT = """You are a Quality Assurance specialist reviewing a Translation Style Guide.
+
+Your task is to review the style guide below and identify any gaps, inconsistencies, or
+areas where the guide could be more specific or actionable.
+
+CHECK FOR:
+1. COMPLETENESS: Are all 9 required sections present with substantial content?
+2. SPECIFICITY: Does each section contain real examples from the source document?
+3. TERMINOLOGY: Are there at least 20 categorized terms? Are DNT items listed?
+4. MEASUREMENTS: Are date/number/unit conversion rules concrete with examples?
+5. CONSISTENCY: Are recommendations consistent across sections?
+6. ACTIONABILITY: Can a translator immediately apply this guidance?
+7. QA SECTION: Does it include specific tools, thresholds, and glossary references?
+
+OUTPUT: Write ONLY the missing or improved content that should be APPENDED to the guide.
+If sections need enhancement, write the enhanced version of those sections.
+If everything is complete, write "REVIEW COMPLETE — No gaps identified."
+
+Do NOT repeat content that is already adequate. Only output additions and improvements.
+"""
+
+# ═══════════════════════════════════════════════════════════════════
+# SECTION-SPECIFIC PROMPTS (for multi-pass generation)
+# ═══════════════════════════════════════════════════════════════════
+
+SECTION_PROMPTS = {
+    "1_scope": """Write Section 1 (SCOPE & PURPOSE) and Section 2 (TARGET AUDIENCE PROFILE).
+Include: document scope, content type, intended use, audience demographics, expertise level,
+reading behavior, cultural sensitivities. Base all content on the actual source document.""",
+
+    "2_domain_language": """Write Section 3 (DOMAIN & CONTEXT) and Section 4 (LANGUAGE SPECIFICATIONS & STYLE).
+Include: industry classification, complexity assessment, standards/frameworks, target dialects,
+register, voice, form of address, DOs/DON'Ts with real examples, stylistic examples.
+Extract specific language patterns from the source document.""",
+
+    "3_gender_terminology": """Write Section 5 (GENDER & INCLUSIVITY) and Section 6 (TERMINOLOGY & DNT).
+Include: gender-neutral strategy per target language, pronoun rules, inclusive language.
+For terminology: extract and categorize AT LEAST 20 terms from the source document.
+List ALL brand names, product names, abbreviations, and DNT items found.
+Include term preferences with forbidden alternatives.""",
+
+    "4_formatting_spatial": """Write Section 7 (FORMATTING & LOCALE) and Section 8 (SPATIAL & VISUAL CONSIDERATIONS).
+Include: date format conversions with REAL examples from the document,
+number format conversions with REAL examples, unit conversions, currency handling,
+quotation marks per target language, expansion/contraction rates, UI constraints.
+Cite actual numbers and dates found in the source document.""",
+
+    "5_qa_resources": """Write Section 9 (QUALITY ASSURANCE & RESOURCES).
+Include:
+- QA Tools: specific tools and checks relevant to this content type
+- Thresholds: explicit pass/fail criteria (critical 0, major 2/1000, minor 5/1000)
+- Standard Glossaries: 3-5 domain-relevant reference resources
+- Risk Assessment: key translation challenges with mitigation strategies
+- Resource Qualifications: required translator expertise, domain experience, tools
+This section must be detailed and actionable.""",
+}
 
 
 class StyleGuideGenerator:
     """
-    Claude-only style guide generator.
+    Multi-pass style guide generator using Claude.
 
-    - Uses LLMClient (Claude) to produce a plain-text style guide.
-    - No JSON / OpenAI path anymore.
+    Architecture:
+    1. Preprocessing: Extract metadata, entities, terminology from source
+    2. Generation: Section-by-section or single-pass guide creation
+    3. Review: Self-review pass to fill gaps and improve quality
     """
 
     def __init__(self, api_key: str, provider: str = "anthropic", model: Optional[str] = None):
-        """
-        provider is kept only to pass 'anthropic' / 'claude' into LLMClient.
-        """
         self.provider = provider
         self.llm_client = LLMClient(provider, api_key, model_name=model)
 
     @staticmethod
-    def _prepare_context(texts: List[str], max_chars: int = 16000) -> str:
+    def _prepare_context(texts: List[str], max_chars: int = 500000) -> str:
         """
-        Join multiple extracted texts with separators and hard truncate
-        to avoid over-long prompts.
+        Join multiple extracted texts with separators.
+        With Sonnet 4.6's 1M context window at standard pricing,
+        we can send much more content (500K chars ≈ 125K tokens).
         """
         joined = "\n\n--- DOCUMENT SEPARATOR ---\n\n".join(t for t in texts if t.strip())
         if len(joined) > max_chars:
-            return joined[:max_chars] + "\n\n...[TRUNCATED]..."
+            return joined[:max_chars] + "\n\n...[TRUNCATED — Document exceeds 500K characters]..."
         return joined
+
+    def _preprocess_document(self, combined_context: str) -> Dict:
+        """
+        Phase 1: Extract metadata from source document using a quick LLM call.
+        Returns structured metadata for use in generation prompts.
+        """
+        logger.info("Phase 1: Preprocessing document for metadata extraction...")
+
+        user_prompt = f"""Analyze this document and extract metadata.
+
+DOCUMENT CONTENT (first 100,000 characters):
+{combined_context[:100000]}
+
+Return ONLY valid JSON as specified in the system prompt."""
+
+        try:
+            raw = self.llm_client.generate_preprocessing(PREPROCESSING_PROMPT, user_prompt)
+            # Clean JSON
+            if "```" in raw:
+                import re
+                match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', raw)
+                if match:
+                    raw = match.group(1)
+            start = raw.find('{')
+            if start != -1:
+                raw = raw[start:]
+            metadata = json.loads(raw)
+            logger.info(f"Preprocessing complete: domain={metadata.get('detected_domain')}, "
+                       f"entities={len(metadata.get('key_entities', {}).get('companies', []))} companies")
+            return metadata
+        except Exception as e:
+            logger.warning(f"Preprocessing failed: {e}. Continuing without metadata.")
+            return {}
+
+    def _build_enriched_prompt(
+        self,
+        combined_context: str,
+        source_lang: str,
+        target_langs: List[str],
+        project_name: str,
+        pm_notes: Optional[str],
+        glossary_text: Optional[str],
+        metadata: Dict,
+    ) -> str:
+        """Build a rich user prompt incorporating preprocessing metadata."""
+        target_desc = ", ".join(target_langs) if target_langs else "GENERIC (multiple possible target languages)"
+
+        entities_section = ""
+        if metadata.get("key_entities"):
+            entities = metadata["key_entities"]
+            entities_section = f"""
+ENTITIES DETECTED IN DOCUMENT:
+- Companies: {', '.join(entities.get('companies', ['None detected']))}
+- Products: {', '.join(entities.get('products', ['None detected']))}
+- People: {', '.join(entities.get('people', ['None detected']))}
+- Places: {', '.join(entities.get('places', ['None detected']))}
+"""
+
+        measurements_section = ""
+        if metadata.get("measurements_found"):
+            measurements_section = f"""
+MEASUREMENTS & NUMBERS FOUND IN DOCUMENT:
+{chr(10).join('- ' + m for m in metadata['measurements_found'][:30])}
+"""
+
+        formats_section = ""
+        if metadata.get("date_formats_found") or metadata.get("number_formats_found"):
+            formats_section = f"""
+FORMAT PATTERNS DETECTED:
+- Date formats: {', '.join(metadata.get('date_formats_found', ['Not detected']))}
+- Number formats: {', '.join(metadata.get('number_formats_found', ['Not detected']))}
+"""
+
+        abbreviations_section = ""
+        if metadata.get("abbreviations_found"):
+            abbreviations_section = f"""
+ABBREVIATIONS & ACRONYMS FOUND:
+{', '.join(metadata['abbreviations_found'][:30])}
+"""
+
+        return f"""PROJECT NAME: {project_name}
+SOURCE LANGUAGE: {source_lang}
+TARGET LANGUAGES: {target_desc}
+DETECTED DOMAIN: {metadata.get('detected_domain', 'Not detected')}
+CONTENT TYPE: {metadata.get('content_type', 'Not detected')}
+REGISTER: {metadata.get('register', 'Not detected')}
+ESTIMATED WORD COUNT: {metadata.get('estimated_word_count', 'Unknown')}
+{entities_section}
+{measurements_section}
+{formats_section}
+{abbreviations_section}
+PROJECT MANAGER NOTES:
+{pm_notes if pm_notes else "None provided."}
+
+GLOSSARY / TERMBASE:
+{glossary_text if glossary_text else "None provided."}
+
+SOURCE DOCUMENT CONTENT:
+{combined_context}
+
+Write the full style guide now, following ALL 9 required sections described in the system prompt.
+Every section must contain substantial, specific content grounded in the source document.
+"""
+
+    def _generate_multi_pass(
+        self,
+        combined_context: str,
+        source_lang: str,
+        target_langs: List[str],
+        project_name: str,
+        pm_notes: Optional[str],
+        glossary_text: Optional[str],
+        metadata: Dict,
+    ) -> str:
+        """
+        Phase 2: Generate style guide section by section.
+        Each section gets the full document context + preprocessing metadata.
+        """
+        logger.info("Phase 2: Multi-pass section-by-section generation...")
+
+        target_desc = ", ".join(target_langs) if target_langs else "GENERIC"
+
+        base_context = f"""PROJECT: {project_name}
+SOURCE LANGUAGE: {source_lang}
+TARGET LANGUAGES: {target_desc}
+DOMAIN: {metadata.get('detected_domain', 'General')}
+CONTENT TYPE: {metadata.get('content_type', 'General')}
+
+DOCUMENT METADATA:
+{json.dumps(metadata, indent=2, ensure_ascii=False, default=str)}
+
+GLOSSARY:
+{glossary_text if glossary_text else "None provided."}
+
+SOURCE DOCUMENT:
+{combined_context}
+"""
+
+        sections = []
+        for section_key, section_instruction in SECTION_PROMPTS.items():
+            logger.info(f"  Generating section: {section_key}")
+            user_prompt = f"""{base_context}
+
+INSTRUCTION:
+{section_instruction}
+
+Write this section now with detailed, specific content grounded in the source document.
+Use numbered headings, bullet points, and real examples from the document."""
+
+            section_text = self.llm_client.generate_section(
+                system_prompt=SYSTEM_PROMPT_MAIN,
+                user_prompt=user_prompt,
+                max_tokens=8000,
+            )
+            sections.append(section_text)
+
+        # Combine sections
+        header = f"""TRANSLATION / LOCALIZATION STYLE GUIDE
+PROJECT: {project_name}
+Source: {source_lang} → Target: {target_desc}
+Generated by: AICONTEXT Style Guide Creator | Anova Translation
+
+---
+
+"""
+        full_guide = header + "\n\n---\n\n".join(sections)
+        return full_guide
+
+    def _review_and_enhance(self, guide_text: str, combined_context: str, metadata: Dict) -> str:
+        """
+        Phase 3: Self-review pass to identify and fill gaps.
+        """
+        logger.info("Phase 3: Self-review and gap-filling...")
+
+        user_prompt = f"""STYLE GUIDE TO REVIEW:
+{guide_text}
+
+ORIGINAL DOCUMENT METADATA:
+{json.dumps(metadata, indent=2, ensure_ascii=False, default=str)}
+
+ORIGINAL DOCUMENT (first 50,000 characters for reference):
+{combined_context[:50000]}
+
+Review the style guide above and provide any missing content or improvements."""
+
+        additions = self.llm_client.generate_review(
+            system_prompt=REVIEW_PROMPT,
+            user_prompt=user_prompt,
+        )
+
+        if additions and "REVIEW COMPLETE" not in additions.upper():
+            logger.info("Review found gaps — appending improvements.")
+            guide_text += "\n\n---\n\nADDITIONAL NOTES & IMPROVEMENTS\n\n" + additions
+        else:
+            logger.info("Review complete — no gaps identified.")
+
+        return guide_text
 
     def create_guide_text(
         self,
@@ -98,20 +428,25 @@ class StyleGuideGenerator:
         project_name: str,
         pm_notes: Optional[str] = None,
         glossary_path: Optional[str] = None,
+        multi_pass: bool = True,
     ) -> str:
         """
-        Main entry point for Claude-only style guide generation.
+        Main entry point for style guide generation.
 
-        - Reads and concatenates content from file_paths.
-        - Loads glossary text if provided.
-        - Builds a rich user prompt.
-        - Calls Claude via LLMClient and returns the guide text.
+        Args:
+            file_paths: List of source document file paths
+            source_lang: Source language code
+            target_langs: List of target language codes
+            project_name: Project name
+            pm_notes: Optional project manager notes
+            glossary_path: Optional path to glossary file
+            multi_pass: If True, use section-by-section generation (recommended)
         """
-        logger.info("Starting style guide (text) generation...")
-        logger.info(f"Source language: {source_lang}")
-        logger.info(f"Target languages: {target_langs if target_langs else 'GENERIC'}")
-        logger.info(f"Project name: {project_name}")
+        logger.info("Starting style guide generation...")
+        logger.info(f"Source: {source_lang}, Targets: {target_langs or 'GENERIC'}, Project: {project_name}")
+        logger.info(f"Mode: {'multi-pass' if multi_pass else 'single-pass'}")
 
+        # Read all source documents
         texts: List[str] = []
         for path in file_paths:
             logger.info(f"Reading file: {path}")
@@ -125,38 +460,32 @@ class StyleGuideGenerator:
             raise ValueError("No valid text could be extracted from the provided files.")
 
         combined_context = self._prepare_context(texts)
+        logger.info(f"Combined context: {len(combined_context)} characters")
 
+        # Load glossary if provided
         glossary_text: Optional[str] = None
         if glossary_path:
             logger.info(f"Loading glossary from: {glossary_path}")
             glossary_text = TerminologyLoader.load_glossary(glossary_path)
 
-        if target_langs:
-            target_desc = ", ".join(target_langs)
+        # Phase 1: Preprocess
+        metadata = self._preprocess_document(combined_context)
+
+        if multi_pass:
+            # Phase 2: Multi-pass generation
+            guide_text = self._generate_multi_pass(
+                combined_context, source_lang, target_langs,
+                project_name, pm_notes, glossary_text, metadata,
+            )
+            # Phase 3: Review
+            guide_text = self._review_and_enhance(guide_text, combined_context, metadata)
         else:
-            target_desc = "GENERIC (multiple possible target languages)"
+            # Single-pass fallback (faster, cheaper, lower quality)
+            user_prompt = self._build_enriched_prompt(
+                combined_context, source_lang, target_langs,
+                project_name, pm_notes, glossary_text, metadata,
+            )
+            guide_text = self.llm_client.generate_style_guide_text(SYSTEM_PROMPT_MAIN, user_prompt)
 
-        system_prompt = SYSTEM_PROMPT_TEXT
-
-        user_prompt = f"""
-PROJECT NAME: {project_name}
-
-SOURCE LANGUAGE: {source_lang}
-TARGET LANGUAGES: {target_desc}
-
-PROJECT MANAGER NOTES:
-{pm_notes if pm_notes else "None provided."}
-
-GLOSSARY SAMPLE:
-{glossary_text if glossary_text else "None provided."}
-
-SOURCE DOCUMENT CONTENT SAMPLES:
-{combined_context}
-
-Write the full style guide now, following the required structure described in the system prompt.
-"""
-
-        logger.info("Calling Claude to generate style guide text...")
-        guide_text = self.llm_client.generate_style_guide_text(system_prompt, user_prompt)
-        logger.info("Received style guide text from Claude.")
+        logger.info("Style guide generation complete.")
         return guide_text
