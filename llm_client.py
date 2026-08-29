@@ -15,7 +15,7 @@ class LLMClient:
     MODELS = [
         "claude-sonnet-4-6",              # Primary — best price/performance
         "claude-opus-4-6",                 # Premium fallback
-        "claude-haiku-4-5-20251001",       # Budget / preprocessing
+        "claude-haiku-4-5",       # Budget / preprocessing
     ]
 
     def __init__(self, provider, api_key: str, model_name: str = None):
@@ -32,7 +32,6 @@ class LLMClient:
         system_prompt: str,
         user_prompt: str,
         max_tokens: int = 32000,
-        temperature: float = 0.2,
         use_cache: bool = False,
     ) -> str:
         """
@@ -56,10 +55,11 @@ class LLMClient:
                     else:
                         system_msg = system_prompt
 
+                    # NOTE: temperature is intentionally omitted — current-gen
+                    # Claude models reject it with a 400. Defaults are used.
                     with self.client.messages.stream(
                         model=model_id,
                         max_tokens=max_tokens,
-                        temperature=temperature,
                         system=system_msg,
                         messages=[{"role": "user", "content": user_prompt}],
                     ) as stream:
@@ -88,8 +88,7 @@ class LLMClient:
         return self._call_claude(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            max_tokens=max_tokens,
-            temperature=0.2,
+            max_tokens=max_tokens,
             use_cache=True,
         )
 
@@ -105,8 +104,7 @@ class LLMClient:
         return self._call_claude(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            max_tokens=max_tokens,
-            temperature=0.2,
+            max_tokens=max_tokens,
             use_cache=True,
         )
 
@@ -119,8 +117,7 @@ class LLMClient:
         return self._call_claude(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            max_tokens=4000,
-            temperature=0.0,
+            max_tokens=4000,
             use_cache=True,
         )
 
@@ -133,7 +130,6 @@ class LLMClient:
         return self._call_claude(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            max_tokens=16000,
-            temperature=0.1,
+            max_tokens=16000,
             use_cache=True,
         )

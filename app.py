@@ -8,6 +8,14 @@ from generator import StyleGuideGenerator
 from exporter import StyleGuideExporter
 from text_utils import DocumentProcessor
 from anova_brand_theme import apply_anova_theme, anova_header, anova_footer, anova_sidebar_logo
+import model_utils
+
+
+@st.cache_data(show_spinner=False)
+def _cached_model_ids(api_key: str):
+    """Live current-generation model ids, cached per key so the Models API
+    isn't hit on every rerun."""
+    return model_utils.list_model_ids(api_key)
 
 # Optional: language detection
 try:
@@ -218,26 +226,30 @@ with col2:
 # Sidebar content
 anova_sidebar_logo()
 
-# Advanced options (model)
+# API key first, so the model list can be fetched live from the account.
+api_key = get_anthropic_key_from_env_or_ui()
+
+# Advanced options (model) — list fetched live from the account (current-
+# generation only), with a manual override. Falls back to a current-only
+# static list when the Models API can't be reached.
 st.sidebar.subheader("Model Settings")
+live_ids = _cached_model_ids(api_key)
+base_ids = live_ids or model_utils.FALLBACK_MODELS
+model_options = list(base_ids) + ["Custom model ID"]
+default_id = model_utils.default_model(base_ids)
+default_index = model_options.index(default_id) if default_id in model_options else 0
 model_choice = st.sidebar.selectbox(
     "Claude Model",
-    [
-        "claude-sonnet-4-6          (Sonnet 4.6 – default, best value)",
-        "claude-opus-4-6            (Opus 4.6 – premium quality)",
-        "claude-haiku-4-5-20251001  (Haiku 4.5 – budget)",
-        "Custom model ID",
-    ],
+    model_options,
+    index=default_index,
+    format_func=lambda mid: mid if mid == "Custom model ID" else model_utils.display_name(mid),
 )
-
-if "Sonnet 4.6" in model_choice:
-    selected_model = "claude-sonnet-4-6"
-elif "Opus 4.6" in model_choice:
-    selected_model = "claude-opus-4-6"
-elif "Haiku 4.5" in model_choice:
-    selected_model = "claude-haiku-4-5-20251001"
-else:
+if model_choice == "Custom model ID":
     selected_model = st.sidebar.text_input("Custom Claude model ID", "").strip()
+else:
+    selected_model = model_choice
+if api_key and not live_ids:
+    st.sidebar.caption("⚠️ Couldn't fetch the live model list — showing current-generation defaults.")
 
 # Generation mode
 st.sidebar.subheader("Generation Mode")
@@ -271,7 +283,6 @@ else:
     selected_detail_level = "basic"
 
 st.sidebar.markdown("---")
-api_key = get_anthropic_key_from_env_or_ui()
 if not api_key:
     st.sidebar.warning("No ANTHROPIC_API_KEY found. Enter it above or set it in your environment.")
 
