@@ -296,9 +296,23 @@ class StyleGuideExporter:
                 run.font.color.rgb = RGBColor(0x9B, 0x9B, 0x9B)
                 continue
 
-            # Heading detection: "1. SCOPE" or "1.1 Sub-heading" or "1.1.1 Detail"
+            # Markdown ATX headings: "#", "##", "###" ... Strip the hashes and
+            # any stray bold markers, map depth to a heading level (1-3).
+            if stripped.startswith('#'):
+                hashes = len(stripped) - len(stripped.lstrip('#'))
+                heading_text = stripped[hashes:].strip().replace('**', '').strip()
+                if heading_text:
+                    h = doc.add_heading(heading_text, level=min(max(hashes, 1), 3))
+                    for run in h.runs:
+                        run.font.color.rgb = CHARCOAL
+                    continue
+
+            # Heading detection: "1. SCOPE" or "1.1 Sub-heading" or "1.1.1 Detail".
+            # Guard against numbered *list items* (e.g. "1. **ride** → yolculuk"),
+            # which carry bold/arrow markup or run long — those are content, not
+            # section headings, and must not become Heading 1.
             level, heading_text = self._detect_heading_level(stripped)
-            if level is not None:
+            if level is not None and '**' not in stripped and '→' not in stripped and len(stripped) <= 70:
                 h = doc.add_heading(heading_text, level=level)
                 for run in h.runs:
                     run.font.color.rgb = CHARCOAL

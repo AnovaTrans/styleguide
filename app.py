@@ -376,18 +376,34 @@ if generate_btn:
             progress_bar.progress(1.0)
             status_text.empty()
 
-            word_count = len(guide_text.split())
-            st.success(f"Style guide generated successfully! ({word_count:,} words, {selected_detail_level} level)")
-            st.download_button(
-                "⬇️ Download Style Guide",
-                data=data,
-                file_name=output_filename,
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            )
+            # Store the result (bytes + metadata) so the download button and
+            # success message survive the rerun a download click triggers — a
+            # button rendered inside this `if generate_btn` block would vanish.
+            st.session_state.sg_result = {
+                "data": data,
+                "filename": output_filename,
+                "word_count": len(guide_text.split()),
+                "detail_level": selected_detail_level,
+            }
 
         except Exception as e:
             progress_bar.empty()
             status_text.empty()
             st.error(f"Error during generation: {e}")
+
+# Persistent result — rendered from session_state so it (and the download
+# button) stay after a download triggers a rerun.
+sg_result = st.session_state.get("sg_result")
+if sg_result:
+    st.success(
+        f"Style guide generated successfully! "
+        f"({sg_result['word_count']:,} words, {sg_result['detail_level']} level)"
+    )
+    st.download_button(
+        "⬇️ Download Style Guide",
+        data=sg_result["data"],
+        file_name=sg_result["filename"],
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
 
 anova_footer()
