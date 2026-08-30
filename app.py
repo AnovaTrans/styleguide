@@ -249,7 +249,10 @@ if model_choice == "Custom model ID":
 else:
     selected_model = model_choice
 if api_key and not live_ids:
-    st.sidebar.caption("⚠️ Couldn't fetch the live model list — showing current-generation defaults.")
+    st.sidebar.caption(
+        "⚠️ Couldn't fetch the live model list (check the API key is valid) — "
+        "showing current-generation defaults."
+    )
 
 # Generation mode
 st.sidebar.subheader("Generation Mode")
